@@ -382,7 +382,8 @@ PAGE = """<!DOCTYPE html>
     animation:rise .5s cubic-bezier(.2,.7,.2,1) both; animation-delay:calc(var(--i)*45ms);}
   @keyframes rise{from{opacity:0; transform:translateY(11px);} to{opacity:1; transform:none;}}
   .card .bar{position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--acc);}
-  .card.gone{opacity:.32; filter:saturate(.35);}
+  .card.prio2{opacity:.6; filter:saturate(.55);}      /* nižší priorita = decentnější */
+  .card.gone{opacity:.3 !important; filter:saturate(.3);}
 
   .t{min-width:84px;}
   .time{display:block; font-family:"IBM Plex Mono",monospace; font-weight:700;
@@ -493,7 +494,7 @@ def _karta(s, zaklad, i):
         f'<span class="leg"><b>{_html.escape(l["label"])}</b> {l["dep"]} '
         f'{_html.escape(_nice(l["from"]))} → {l["arr"]} {_html.escape(_nice(l["to"]))}</span>'
         for l in s["legs"])
-    return f'''<article class="card" data-dep="{s['dt'].isoformat()}" style="--i:{i}">
+    return f'''<article class="card prio{s['_prio']}" data-dep="{s['dt'].isoformat()}" style="--i:{i}">
   <span class="bar"></span>
   <div class="t"><time class="time">{s['odjezd']}</time><span class="cd"></span></div>
   <div class="m">
