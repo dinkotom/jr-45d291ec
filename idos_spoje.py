@@ -395,9 +395,10 @@ PAGE = """<!DOCTYPE html>
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,106,61,.45);} 50%{box-shadow:0 0 0 7px rgba(255,106,61,0);}}
 
   .route{font-family:"Bricolage Grotesque",sans-serif; font-weight:700; font-size:1.06rem;
-    letter-spacing:-.01em;}
-  .route .ep{white-space:nowrap;}
-  .route .arr{font-style:normal; color:var(--acc); margin:0 .42em; font-weight:800;}
+    letter-spacing:-.01em; display:flex; flex-wrap:wrap; align-items:baseline;
+    column-gap:.42em; row-gap:1px;}
+  .route .ep{white-space:nowrap; overflow-wrap:anywhere;}
+  .route .arr{font-style:normal; color:var(--acc); font-weight:800;}
   .meta{font-family:"IBM Plex Mono",monospace; font-size:.73rem; color:var(--muted); margin-top:3px;}
   .legs{margin-top:8px; display:flex; flex-direction:column; gap:2px;}
   .leg{font-family:"IBM Plex Mono",monospace; font-size:.71rem; color:var(--muted);}
