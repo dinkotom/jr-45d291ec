@@ -383,6 +383,12 @@ PAGE = """<!DOCTYPE html>
   @keyframes rise{from{opacity:0; transform:translateY(11px);} to{opacity:1; transform:none;}}
   .card .bar{position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--acc);}
   .card.prio2{opacity:.6; filter:saturate(.55);}      /* nižší priorita = decentnější */
+  .card.prio1{                                          /* prioritní spoje „svítí" */
+    background:linear-gradient(180deg, color-mix(in srgb, var(--acc) 10%, var(--panel)), var(--panel) 72%);
+    border-color:color-mix(in srgb, var(--acc) 36%, var(--line));
+    box-shadow:0 10px 28px -14px color-mix(in srgb, var(--acc) 72%, transparent);
+  }
+  .card.prio1 .bar{width:5px; box-shadow:0 0 16px color-mix(in srgb, var(--acc) 78%, transparent);}
   .card.gone{opacity:.3 !important; filter:saturate(.3);}
 
   .t{min-width:84px;}
