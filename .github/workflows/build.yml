@@ -1,0 +1,46 @@
+name: build-and-deploy
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # každých ~15 min (GitHub může spouštět s mírným zpožděním)
+  workflow_dispatch:          # ruční spuštění
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Europe/Prague
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Generate page
+        run: |
+          mkdir -p public
+          python idos_spoje.py --pocet 14 --html public/index.html
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
