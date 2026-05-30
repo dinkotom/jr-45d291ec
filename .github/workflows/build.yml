@@ -30,7 +30,7 @@ jobs:
       - name: Generate page
         run: |
           mkdir -p public
-          python idos_spoje.py --pocet 14 --html public/index.html
+          python idos_spoje.py --pocet 12 --html public/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public

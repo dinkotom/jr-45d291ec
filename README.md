@@ -5,6 +5,12 @@ Scrapuje veřejný IDOS (`idos.idnes.cz`). GitHub Actions každých ~15 min vyge
 stránku a publikuje ji na GitHub Pages. Stránka má `noindex` (nedohledatelná přes Google)
 a obnovuje se v prohlížeči sama každých 5 min + živý odpočet „za X min".
 
+Design ve stylu **odjezdové tabule** (tmavé téma, mono časy). Obsah je v **tabech**:
+- horní taby = **město** (Ostrava / Frýdek-Místek),
+- spodní taby = **směr** (Tam = domů→město, Zpět = město→domů).
+
+Do/z **Frýdku-Místku** se zobrazují **jen přímé spoje** (`jen_prime: True` v configu).
+
 ## Změna zastávek / priorit
 
 Uprav `ORIGINS` / `DESTINATIONS` nahoře v [idos_spoje.py](idos_spoje.py) a `git push` —

@@ -37,10 +37,13 @@ ORIGINS = [
     ("2", "Nošovice,,U lesa"),
 ]
 
-# Cílové zastávky (klíč = přepínač --dest, hodnota = (popisek, název v IDOS))
+# Cílová města (klíč = přepínač --dest).
+#   label     = popisek do UI
+#   name      = název v IDOS
+#   jen_prime = True → povolit pouze přímé spoje (bez přestupů), oba směry
 DESTINATIONS = {
-    "ostrava": ("Ostrava", "Ostrava"),
-    "fm": ("Frýdek-Místek", "Frýdek-Místek"),
+    "ostrava": {"label": "Ostrava", "name": "Ostrava", "jen_prime": False},
+    "fm": {"label": "Frýdek-Místek", "name": "Frýdek-Místek", "jen_prime": True},
 }
 
 POCET_SPOJU = 10         # kolik nejbližších spojů zobrazit (sloučeně, chronologicky)
@@ -221,138 +224,313 @@ def vypis_spoj(i, s, zaklad):
         print(f"       {leg['label']:<14} {leg['dep']} {leg['from']}  →  {leg['arr']} {leg['to']}")
 
 
-def seber_spoje(origins, dests, pocet, kdy, datum, zaklad, progress=True):
-    """Posbírá spoje ze všech kombinací (zastávka × cíl), seřadí chronologicky
-    a vrátí nejbližších `pocet`. Z každé kombinace bere až `pocet`, ať je globálně
-    nejbližších `pocet` pokryto i kdyby vše jelo z jediné zastávky."""
+def _nice(name):
+    """Hezčí název zastávky do UI: 'Pazderna,,Špok' -> 'Pazderna, Špok'."""
+    return name.replace(",,", ", ")
+
+
+def seber_smer(home_stops, city_name, smer, pocet, kdy, datum, zaklad,
+               jen_prime, progress=True):
+    """Posbírá spoje pro jeden směr ('tam' = domů→město, 'zpet' = město→domů)
+    ze všech domácích zastávek, seřadí chronologicky a vrátí nejbližších `pocet`.
+    Při `jen_prime` ponechá pouze přímé spoje (bez přestupů)."""
     vsechny = []
-    for dkey, (dlabel, dname) in dests.items():
-        for prio, oname in origins:
-            if progress:
-                print(f"  … načítám {oname} → {dlabel}", file=sys.stderr)
-            try:
-                spoje = najdi_spoje(oname, dname, pocet=pocet,
-                                    kdy=kdy, datum=datum, zaklad=zaklad)
-            except Exception as e:
-                print(f"     (chyba: {e})", file=sys.stderr)
+    fetch = pocet * 2 if jen_prime else pocet   # při filtru přímých nabrat víc
+    for prio, home in home_stops:
+        f, t = (home, city_name) if smer == "tam" else (city_name, home)
+        if progress:
+            print(f"  … {f} → {t}", file=sys.stderr)
+        try:
+            spoje = najdi_spoje(f, t, pocet=fetch, kdy=kdy, datum=datum, zaklad=zaklad)
+        except Exception as e:
+            print(f"     (chyba: {e})", file=sys.stderr)
+            continue
+        for s in spoje:
+            if jen_prime and s["prestupy"] > 0:
                 continue
-            for s in spoje:
-                s["_prio"] = prio
-                s["_origin"] = oname
-                s["_dest"] = dlabel
-                vsechny.append(s)
-            _time.sleep(PAUZA_S)
+            s["_prio"] = prio
+            s["_origin"] = f
+            s["_dest"] = t
+            vsechny.append(s)
+        _time.sleep(PAUZA_S)
     vsechny.sort(key=lambda s: s["dt"])
     return vsechny[:pocet]
 
 
+def seber_vse(dests, home_stops, pocet, kdy, datum, zaklad, progress=True):
+    """Vrátí strukturu {dkey: {label, jen_prime, smery: {tam:[...], zpet:[...]}}}."""
+    data = {}
+    for dkey, d in dests.items():
+        smery = {}
+        for smer in ("tam", "zpet"):
+            if progress:
+                print(f"== {d['label']} / {smer} ==", file=sys.stderr)
+            smery[smer] = seber_smer(home_stops, d["name"], smer, pocet,
+                                     kdy, datum, zaklad, d["jen_prime"], progress)
+        data[dkey] = {"label": d["label"], "jen_prime": d["jen_prime"], "smery": smery}
+    return data
+
+
 # ---------------------------------------------------------------------------
-# HTML stránka pro rodinu
+# Textový výpis (CLI)
 # ---------------------------------------------------------------------------
 
-HTML_SABLONA = """<!DOCTYPE html>
+def vypis_spoj(i, s, zaklad):
+    trv = f"{s['trvani_min']} min" if s["trvani_min"] else "?"
+    prest = "přímý" if s["prestupy"] == 0 else f"{s['prestupy']}× přestup"
+    den = ""
+    if s["dt"].date() != zaklad.date():
+        den = f" {s['dt'].day}.{s['dt'].month}."
+    print(f"{i:>2}. {s['odjezd']} → {s['prijezd']}{den}   [P{s['_prio']}] "
+          f"{_nice(s['_origin'])}  →  {_nice(s['_dest'])}   ({trv}, {prest})")
+    for leg in s["legs"]:
+        print(f"       {leg['label']:<14} {leg['dep']} {_nice(leg['from'])}  →  "
+              f"{leg['arr']} {_nice(leg['to'])}")
+
+
+def vypis_text(data, zaklad, kdy, datum):
+    print(f"\nIDOS – nejbližší spoje  (od {kdy}, {datum})")
+    for dkey, d in data.items():
+        for smer in ("tam", "zpet"):
+            nadpis = "TAM (domů → město)" if smer == "tam" else "ZPĚT (město → domů)"
+            print("\n" + "=" * 72)
+            print(f"### {d['label']} — {nadpis}"
+                  + ("  [jen přímé]" if d["jen_prime"] else ""))
+            spoje = d["smery"][smer]
+            if not spoje:
+                print("   (žádné spoje)")
+            for i, s in enumerate(spoje, 1):
+                vypis_spoj(i, s, zaklad)
+
+
+# ---------------------------------------------------------------------------
+# HTML stránka pro rodinu  (estetika „odjezdové tabule")
+# ---------------------------------------------------------------------------
+
+PAGE = """<!DOCTYPE html>
 <html lang="cs">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <meta http-equiv="refresh" content="300">
-<title>Spoje – Ostrava &amp; Frýdek-Místek</title>
+<meta name="theme-color" content="#0b0c10">
+<title>Odjezdy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=IBM+Plex+Mono:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root {{ color-scheme: light dark; }}
-  * {{ box-sizing: border-box; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-         margin: 0; padding: 0 12px 40px; background: #f4f5f7; color: #1c1d1f; }}
-  @media (prefers-color-scheme: dark) {{ body {{ background:#15171a; color:#e8e8ea; }} }}
-  header {{ position: sticky; top: 0; background: inherit; padding: 14px 2px 8px; }}
-  h1 {{ font-size: 1.15rem; margin: 0 0 2px; }}
-  .meta {{ font-size: .8rem; opacity: .65; }}
-  .card {{ background: #fff; border-radius: 12px; padding: 11px 13px; margin: 9px 0;
-           box-shadow: 0 1px 3px rgba(0,0,0,.08); display: flex; gap: 12px; align-items: flex-start; }}
-  @media (prefers-color-scheme: dark) {{ .card {{ background:#22252a; box-shadow:none; }} }}
-  .card.gone {{ opacity: .4; }}
-  .when {{ min-width: 78px; }}
-  .time {{ font-size: 1.3rem; font-weight: 700; line-height: 1.1; }}
-  .cd {{ font-size: .78rem; font-weight: 600; color:#1a7f37; }}
-  .cd.soon {{ color:#c2410c; }}
-  .body {{ flex: 1; min-width: 0; }}
-  .route {{ font-weight: 600; font-size: .98rem; }}
-  .tags {{ margin: 3px 0 4px; display: flex; gap: 6px; flex-wrap: wrap; align-items:center; }}
-  .tag {{ font-size: .72rem; padding: 1px 7px; border-radius: 999px; font-weight: 600; }}
-  .p1 {{ background:#dbeafe; color:#1e40af; }}
-  .p2 {{ background:#ede9fe; color:#5b21b6; }}
-  .ostrava {{ background:#fde68a; color:#92400e; }}
-  .fm {{ background:#bbf7d0; color:#166534; }}
-  .info {{ font-size: .78rem; opacity:.7; }}
-  .legs {{ font-size: .76rem; opacity:.75; margin-top: 5px; line-height: 1.45; }}
-  .arr {{ font-size:.9rem; opacity:.8; }}
-  footer {{ font-size:.72rem; opacity:.5; text-align:center; margin-top:18px; }}
+  :root{
+    --bg:#0b0c10; --panel:#13151c; --ink:#efe9db; --muted:#969cab;
+    --line:rgba(255,255,255,.085); --amber:#f6a623; --green:#33d39a; --hot:#ff6a3d;
+    --acc:var(--amber);
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0; color:var(--ink); background:var(--bg);
+    font-family:"IBM Plex Sans",system-ui,sans-serif; line-height:1.42;
+    padding:0 14px 60px;
+    background-image:
+      radial-gradient(130% 60% at 50% -12%, rgba(246,166,35,.12), transparent 58%),
+      radial-gradient(90% 50% at 105% 2%, rgba(51,211,154,.08), transparent 60%);
+    background-attachment:fixed;
+  }
+  body::before{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.045;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .wrap{position:relative; z-index:1; max-width:700px; margin:0 auto;}
+
+  header{padding:30px 2px 8px;}
+  .kicker{font-family:"IBM Plex Mono",monospace; font-size:.7rem; letter-spacing:.34em;
+    text-transform:uppercase; color:var(--muted);}
+  h1{font-family:"Bricolage Grotesque",sans-serif; font-weight:800;
+    font-size:clamp(2.3rem,11vw,3.4rem); line-height:.92; letter-spacing:-.025em;
+    margin:.16em 0 .14em;}
+  h1 .dot{color:var(--amber);}
+  .sub{display:flex; justify-content:space-between; align-items:baseline; gap:12px;
+    font-family:"IBM Plex Mono",monospace; font-size:.76rem; color:var(--muted);}
+  #clock{color:var(--ink); font-weight:700; font-variant-numeric:tabular-nums;}
+
+  .ctabs{display:flex; gap:9px; margin:22px 0 10px;}
+  .ctab{flex:1; appearance:none; cursor:pointer; color:var(--muted);
+    font-family:"Bricolage Grotesque",sans-serif; font-weight:700; font-size:1.05rem;
+    background:var(--panel); border:1px solid var(--line); border-radius:15px;
+    padding:14px 12px; transition:transform .15s, background .25s, color .25s, border-color .25s;}
+  .ctab:active{transform:scale(.97);}
+  .ctab[data-city="ostrava"].on{background:var(--amber); border-color:var(--amber); color:#120c02;}
+  .ctab[data-city="fm"].on{background:var(--green); border-color:var(--green); color:#03130d;}
+
+  .dtabs{display:flex; gap:8px; margin:0 0 18px;}
+  .dtab{appearance:none; cursor:pointer; color:var(--muted);
+    font-family:"IBM Plex Mono",monospace; font-size:.8rem; font-weight:600; letter-spacing:.05em;
+    background:transparent; border:1px solid var(--line); border-radius:999px;
+    padding:8px 17px; transition:.2s;}
+  .dtab i{font-style:normal; opacity:.7;}
+  .dtab.on{color:var(--ink); border-color:var(--ink); background:rgba(255,255,255,.05);}
+
+  .panel{animation:fade .35s ease both;}
+  .panel[hidden]{display:none;}
+  .city-ostrava{--acc:var(--amber);}
+  .city-fm{--acc:var(--green);}
+  @keyframes fade{from{opacity:0; transform:translateY(5px);} to{opacity:1; transform:none;}}
+
+  .card{position:relative; display:grid; grid-template-columns:auto 1fr auto; gap:14px;
+    align-items:start; background:var(--panel); border:1px solid var(--line);
+    border-radius:16px; padding:14px 15px 13px 19px; margin:11px 0; overflow:hidden;
+    animation:rise .5s cubic-bezier(.2,.7,.2,1) both; animation-delay:calc(var(--i)*45ms);}
+  @keyframes rise{from{opacity:0; transform:translateY(11px);} to{opacity:1; transform:none;}}
+  .card .bar{position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--acc);}
+  .card.gone{opacity:.32; filter:saturate(.35);}
+
+  .t{min-width:84px;}
+  .time{display:block; font-family:"IBM Plex Mono",monospace; font-weight:700;
+    font-size:1.66rem; line-height:1; letter-spacing:-.02em; font-variant-numeric:tabular-nums;}
+  .cd{display:inline-block; margin-top:7px; padding:1px 8px; border-radius:999px;
+    font-family:"IBM Plex Mono",monospace; font-size:.7rem; font-weight:600;
+    color:var(--muted); border:1px solid var(--line); white-space:nowrap;}
+  .cd.soon{color:#120c02; background:var(--hot); border-color:var(--hot);
+    animation:pulse 1.7s ease-in-out infinite;}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,106,61,.45);} 50%{box-shadow:0 0 0 7px rgba(255,106,61,0);}}
+
+  .route{font-family:"Bricolage Grotesque",sans-serif; font-weight:700; font-size:1.06rem;
+    letter-spacing:-.01em;}
+  .route .ep{white-space:nowrap;}
+  .route .arr{font-style:normal; color:var(--acc); margin:0 .42em; font-weight:800;}
+  .meta{font-family:"IBM Plex Mono",monospace; font-size:.73rem; color:var(--muted); margin-top:3px;}
+  .legs{margin-top:8px; display:flex; flex-direction:column; gap:2px;}
+  .leg{font-family:"IBM Plex Mono",monospace; font-size:.71rem; color:var(--muted);}
+  .leg b{color:var(--ink); font-weight:600;}
+
+  .prio{align-self:flex-start; font-family:"IBM Plex Mono",monospace; font-size:.64rem;
+    font-weight:700; letter-spacing:.06em; padding:2px 7px; border-radius:7px;
+    border:1px solid var(--line); white-space:nowrap;}
+  .prio.p1{color:#ffd27d; border-color:rgba(255,210,125,.32);}
+  .prio.p2{color:#8fd5ff; border-color:rgba(143,213,255,.32);}
+
+  .empty{border:1px dashed var(--line); border-radius:16px; padding:26px 18px; text-align:center;
+    color:var(--muted); font-family:"IBM Plex Mono",monospace; font-size:.82rem; margin:11px 0;}
+
+  footer{margin-top:26px; text-align:center; color:var(--muted); opacity:.7;
+    font-family:"IBM Plex Mono",monospace; font-size:.68rem; letter-spacing:.04em;}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none !important;}
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>🚌 Nejbližší spoje</h1>
-  <div class="meta">Aktualizováno {cas_aktualizace} • obnovuje se automaticky</div>
-</header>
-<main id="seznam">
-{karty}
-</main>
-<footer>Data: IDOS (idos.idnes.cz). Stránka se sama obnoví každých 5 min.</footer>
+<div class="wrap">
+  <header>
+    <div class="kicker">Bus · Vlak · MHD — idos</div>
+    <h1>Odjezdy<span class="dot">.</span></h1>
+    <div class="sub">
+      <span>Aktualizováno __CAS__</span>
+      <span id="clock">--:--:--</span>
+    </div>
+  </header>
+
+  <nav class="ctabs">__CTABS__</nav>
+  <nav class="dtabs">
+    <button class="dtab on" data-smer="tam" onclick="setSmer('tam')">Tam <i>→</i></button>
+    <button class="dtab" data-smer="zpet" onclick="setSmer('zpet')"><i>←</i> Zpět</button>
+  </nav>
+
+  <main>__PANELS__</main>
+
+  <footer>Data: IDOS (idos.idnes.cz) · stránka se sama obnoví každých 5 min</footer>
+</div>
+
 <script>
-function tik() {{
-  var now = new Date();
-  document.querySelectorAll('.card').forEach(function(c) {{
-    var dep = new Date(c.dataset.dep);
-    var diff = Math.round((dep - now) / 60000);
-    var el = c.querySelector('.cd');
-    if (diff < 0) {{ c.classList.add('gone'); el.textContent = 'ujel'; el.classList.remove('soon'); return; }}
-    c.classList.remove('gone');
-    if (diff < 60) {{ el.textContent = 'za ' + diff + ' min'; }}
-    else {{ el.textContent = 'za ' + Math.floor(diff/60) + ' h ' + (diff%60) + ' min'; }}
-    el.classList.toggle('soon', diff <= 10);
-  }});
-}}
-tik(); setInterval(tik, 20000);
+  var city = "__CITY0__", smer = "tam";
+  function apply(){
+    var panels = document.querySelectorAll(".panel");
+    for (var i=0;i<panels.length;i++){
+      var p = panels[i];
+      p.hidden = !(p.dataset.city===city && p.dataset.smer===smer);
+    }
+    document.querySelectorAll(".ctab").forEach(function(b){ b.classList.toggle("on", b.dataset.city===city); });
+    document.querySelectorAll(".dtab").forEach(function(b){ b.classList.toggle("on", b.dataset.smer===smer); });
+  }
+  function setCity(c){ city=c; apply(); }
+  function setSmer(s){ smer=s; apply(); }
+
+  function tik(){
+    var now = new Date();
+    document.querySelectorAll(".card").forEach(function(c){
+      var dep = new Date(c.dataset.dep);
+      var diff = Math.round((dep - now) / 60000);
+      var el = c.querySelector(".cd");
+      if (diff < 0){ c.classList.add("gone"); el.textContent="ujel"; el.classList.remove("soon"); return; }
+      c.classList.remove("gone");
+      el.textContent = diff < 60 ? ("za " + diff + " min")
+                                 : ("za " + Math.floor(diff/60) + " h " + (diff%60) + " min");
+      el.classList.toggle("soon", diff <= 10);
+    });
+  }
+  function clock(){
+    var d = new Date(), p = function(n){ return (n<10?"0":"")+n; };
+    var el = document.getElementById("clock");
+    if (el) el.textContent = p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+  }
+  apply(); tik(); clock();
+  setInterval(tik, 15000); setInterval(clock, 1000);
 </script>
 </body>
 </html>
 """
 
 
-def _karta(s, zaklad):
+def _karta(s, zaklad, i):
     trv = f"{s['trvani_min']} min" if s["trvani_min"] else "?"
     prest = "přímý" if s["prestupy"] == 0 else f"{s['prestupy']}× přestup"
     den = ""
     if s["dt"].date() != zaklad.date():
-        den = f" ({s['dt'].day}.{s['dt'].month}.)"
-    dtag = "ostrava" if s["_dest"].startswith("Ostrava") else "fm"
-    legs_html = "<br>".join(
-        f"{_html.escape(l['label'])}: {l['dep']} {_html.escape(l['from'])} → "
-        f"{l['arr']} {_html.escape(l['to'])}" for l in s["legs"])
-    return f"""  <div class="card" data-dep="{s['dt'].isoformat()}">
-    <div class="when">
-      <div class="time">{s['odjezd']}</div>
-      <div class="cd"></div>
-    </div>
-    <div class="body">
-      <div class="route">{_html.escape(s['_origin'])} → {_html.escape(s['_dest'])}{den}</div>
-      <div class="tags">
-        <span class="tag p{s['_prio']}">priorita {s['_prio']}</span>
-        <span class="tag {dtag}">{_html.escape(s['_dest'])}</span>
-        <span class="info">příjezd {s['prijezd']} • {trv} • {prest}</span>
-      </div>
-      <div class="legs">{legs_html}</div>
-    </div>
-  </div>"""
+        den = f" · {s['dt'].day}.{s['dt'].month}."
+    legs_html = "".join(
+        f'<span class="leg"><b>{_html.escape(l["label"])}</b> {l["dep"]} '
+        f'{_html.escape(_nice(l["from"]))} → {l["arr"]} {_html.escape(_nice(l["to"]))}</span>'
+        for l in s["legs"])
+    return f'''<article class="card" data-dep="{s['dt'].isoformat()}" style="--i:{i}">
+  <span class="bar"></span>
+  <div class="t"><time class="time">{s['odjezd']}</time><span class="cd"></span></div>
+  <div class="m">
+    <div class="route"><span class="ep">{_html.escape(_nice(s['_origin']))}</span><i class="arr">→</i><span class="ep">{_html.escape(_nice(s['_dest']))}</span></div>
+    <div class="meta">příjezd {s['prijezd']}{den} · {trv} · {prest}</div>
+    <div class="legs">{legs_html}</div>
+  </div>
+  <span class="prio p{s['_prio']}">P{s['_prio']}</span>
+</article>'''
 
 
-def vytvor_html(vybrane, zaklad):
-    cas = datetime.now().strftime("%-d.%-m.%Y %H:%M")
-    if vybrane:
-        karty = "\n".join(_karta(s, zaklad) for s in vybrane)
+def _panel(dkey, d, smer, zaklad, hidden):
+    spoje = d["smery"][smer]
+    if spoje:
+        vnitrek = "\n".join(_karta(s, zaklad, j) for j, s in enumerate(spoje))
     else:
-        karty = '  <p>Momentálně nenalezeny žádné spoje.</p>'
-    return HTML_SABLONA.format(cas_aktualizace=cas, karty=karty)
+        msg = "Žádné přímé spoje v dohledné době." if d["jen_prime"] else "Žádné spoje v dohledné době."
+        vnitrek = f'<div class="empty">{msg}</div>'
+    h = " hidden" if hidden else ""
+    return (f'<section class="panel city-{dkey}" data-city="{dkey}" '
+            f'data-smer="{smer}"{h}>\n{vnitrek}\n</section>')
+
+
+def vytvor_html(data, zaklad):
+    cas = datetime.now().strftime("%-d.%-m.%Y %H:%M")
+    keys = list(data.keys())
+    city0 = keys[0] if keys else "ostrava"
+    ctabs = "\n".join(
+        f'<button class="ctab{" on" if dkey == city0 else ""}" data-city="{dkey}" '
+        f'onclick="setCity(\'{dkey}\')">{_html.escape(data[dkey]["label"])}</button>'
+        for dkey in keys)
+    panely = "\n".join(
+        _panel(dkey, data[dkey], smer, zaklad, hidden=not (dkey == city0 and smer == "tam"))
+        for dkey in keys for smer in ("tam", "zpet"))
+    return (PAGE.replace("__CAS__", _html.escape(cas))
+                .replace("__CTABS__", ctabs)
+                .replace("__PANELS__", panely)
+                .replace("__CITY0__", city0))
 
 
 # ---------------------------------------------------------------------------
@@ -360,10 +538,10 @@ def vytvor_html(vybrane, zaklad):
 # ---------------------------------------------------------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Nejbližší spoje do Ostravy a Frýdku-Místku.")
-    ap.add_argument("--dest", choices=list(DESTINATIONS), help="jen jeden cíl (ostrava|fm)")
+    ap = argparse.ArgumentParser(description="Nejbližší spoje do Ostravy a Frýdku-Místku (tam i zpět).")
+    ap.add_argument("--dest", choices=list(DESTINATIONS), help="jen jedno město (ostrava|fm)")
     ap.add_argument("--from", dest="odkud", help="jen jedna priorita počáteční zastávky (1-2)")
-    ap.add_argument("--pocet", type=int, default=POCET_SPOJU, help="počet spojů (výchozí 10)")
+    ap.add_argument("--pocet", type=int, default=POCET_SPOJU, help="počet spojů na směr (výchozí 10)")
     ap.add_argument("--kdy", help="čas odjezdu HH:MM (výchozí: teď)")
     ap.add_argument("--datum", help="datum DD.MM.RRRR (výchozí: dnes)")
     ap.add_argument("--najdi", help="jen vypíše nápovědu názvů zastávek pro daný text a skončí")
@@ -376,10 +554,10 @@ def main():
             print(f"  {txt}   [{desc}]")
         return
 
-    origins = ORIGINS
+    home_stops = ORIGINS
     if args.odkud:
-        origins = [o for o in ORIGINS if o[0] == args.odkud]
-        if not origins:
+        home_stops = [o for o in ORIGINS if o[0] == args.odkud]
+        if not home_stops:
             sys.exit(f"Priorita {args.odkud!r} není v konfiguraci.")
 
     dests = DESTINATIONS
@@ -403,24 +581,19 @@ def main():
     kdy = args.kdy or ted.strftime("%H:%M")
     datum = args.datum or ted.strftime("%-d.%-m.%Y")
 
-    vybrane = seber_spoje(origins, dests, args.pocet, args.kdy, args.datum, zaklad)
+    data = seber_vse(dests, home_stops, args.pocet, args.kdy, args.datum, zaklad)
 
     if args.html:
-        out = vytvor_html(vybrane, zaklad)
+        out = vytvor_html(data, zaklad)
         if args.html == "-":
             sys.stdout.write(out)
         else:
             with open(args.html, "w", encoding="utf-8") as f:
                 f.write(out)
-            print(f"HTML zapsáno do {args.html} ({len(vybrane)} spojů).", file=sys.stderr)
+            print(f"HTML zapsáno do {args.html}.", file=sys.stderr)
         return
 
-    print(f"\nIDOS – {len(vybrane)} nejbližších spojů chronologicky  (od {kdy}, {datum})")
-    print("=" * 72)
-    if not vybrane:
-        print("(žádné spoje nenalezeny)")
-    for i, s in enumerate(vybrane, 1):
-        vypis_spoj(i, s, zaklad)
+    vypis_text(data, zaklad, kdy, datum)
 
 
 if __name__ == "__main__":
