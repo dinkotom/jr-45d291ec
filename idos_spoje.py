@@ -408,7 +408,7 @@ PAGE = """<!DOCTYPE html>
     font-weight:700; letter-spacing:.06em; padding:2px 7px; border-radius:7px;
     border:1px solid var(--line); white-space:nowrap;}
   .prio.p1{color:#ffd27d; border-color:rgba(255,210,125,.32);}
-  .prio.p2{color:#8fd5ff; border-color:rgba(143,213,255,.32);}
+  .prio.p2{color:#6b7180; border-color:rgba(255,255,255,.07); opacity:.85;}
 
   .empty{border:1px dashed var(--line); border-radius:16px; padding:26px 18px; text-align:center;
     color:var(--muted); font-family:"IBM Plex Mono",monospace; font-size:.82rem; margin:11px 0;}
