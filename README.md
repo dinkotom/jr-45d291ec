@@ -22,8 +22,9 @@ python3 idos_spoje.py                       # textový výpis
 python3 idos_spoje.py --html out.html       # HTML stránka
 ```
 
-## Pozor
+## Cron / keepalive
 
 GitHub vypíná naplánované (cron) workflow po ~60 dnech bez aktivity v repu.
-Když přestane aktualizovat, stačí cokoli pushnout nebo workflow ručně spustit
-(záložka Actions → *build-and-deploy* → *Run workflow*).
+Workflow proto obsahuje **keepalive** krok: když je poslední commit starší než
+50 dní, udělá prázdný commit a tím cron udrží naživu (bez zahlcení historie).
+Případné ruční spuštění: Actions → *build-and-deploy* → *Run workflow*.
