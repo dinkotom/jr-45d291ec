@@ -447,7 +447,7 @@ PAGE = """<!DOCTYPE html>
 
   <main>__PANELS__</main>
 
-  <footer>Data: IDOS (idos.idnes.cz) · stránka se sama obnoví každých 5 min</footer>
+  <footer><a href="https://dinkotom.github.io/domov-60de93c6/" style="color:var(--amber);text-decoration:none;font-weight:600">← Doma</a> · Data: IDOS (idos.idnes.cz) · obnova á 5 min</footer>
 </div>
 
 <script>
