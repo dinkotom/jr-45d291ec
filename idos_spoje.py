@@ -469,9 +469,11 @@ PAGE = """<!DOCTYPE html>
     document.querySelectorAll(".card").forEach(function(c){
       var dep = new Date(c.dataset.dep);
       var diff = Math.round((dep - now) / 60000);
+      // odolnost vůči stáří stránky: odjeté spoje rovnou schovej,
+      // seznam tak vždy začíná dalším reálně odjíždějícím spojem
+      if (diff < 0){ c.style.display = "none"; return; }
+      c.style.display = "";
       var el = c.querySelector(".cd");
-      if (diff < 0){ c.classList.add("gone"); el.textContent="ujel"; el.classList.remove("soon"); return; }
-      c.classList.remove("gone");
       el.textContent = diff < 60 ? ("za " + diff + " min")
                                  : ("za " + Math.floor(diff/60) + " h " + (diff%60) + " min");
       el.classList.toggle("soon", diff <= 10);
